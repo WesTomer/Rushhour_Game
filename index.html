@@ -486,6 +486,96 @@ function generatePuzzle() {
         }, 20);
     }
         genStatus.innerText = "Generating board...";
+        generateBtn.disabled = true;
+        
+        setTimeout(() => {
+            const diff = difficultySelect.value;
+            let minRange = 12, maxRange = 20;
+            if (diff === 'expert') { minRange = 21; maxRange = 35; }
+            if (diff === 'grandmaster') { minRange = 36; maxRange = 60; }
+
+            for (let attempts = 0; attempts < 100; attempts++) {
+                // 1. Start with a SOLVED state (Red car at the exit)
+                const vehicles = [];
+                vehicles.push({ id: 0, x: 4, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' });
+
+                const numObstacles = Math.floor(Math.random() * 4) + 9; // 9 to 12 obstacles
+                let colorIdx = 0;
+
+                // Randomly pack the rest of the board around the solved car
+                for (let i = 0; i < 50 && vehicles.length - 1 < numObstacles; i++) {
+                    const isTruck = Math.random() < 0.3;
+                    const length = isTruck ? 3 : 2;
+                    const orientation = Math.random() < 0.5 ? 'H' : 'V';
+                    
+                    const maxX = orientation === 'H' ? 6 - length : 5;
+                    const maxY = orientation === 'V' ? 6 - length : 5;
+                    const rx = Math.floor(Math.random() * (maxX + 1));
+                    const ry = Math.floor(Math.random() * (maxY + 1));
+
+                    let overlap = false;
+                    const grid = getBoardGrid(vehicles);
+                    for (let l = 0; l < length; l++) {
+                        const checkX = orientation === 'H' ? rx + l : rx;
+                        const checkY = orientation === 'V' ? ry + l : ry;
+                        if (grid[checkY][checkX] !== -1) { overlap = true; break; }
+                    }
+
+                    if (!overlap) {
+                        vehicles.push({
+                            id: vehicles.length, x: rx, y: ry, length: length, orientation: orientation,
+                            isTarget: false, color: VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length]
+                        });
+                        colorIdx++;
+                    }
+                }
+
+                // 2. Scramble by moving pieces backward into a tangled state
+                let scrambledState = vehicles;
+                const visited = new Set();
+                visited.add(encodeState(scrambledState));
+
+                // Walk 60 to 100 random valid steps away from the solution
+                const walkSteps = Math.floor(Math.random() * 40) + 60; 
+                for (let step = 0; step < walkSteps; step++) {
+                    const neighbors = getValidMoves(scrambledState);
+                    const unvisited = neighbors.filter(n => !visited.has(encodeState(n)));
+
+                    if (unvisited.length > 0) {
+                        scrambledState = unvisited[Math.floor(Math.random() * unvisited.length)];
+                        visited.add(encodeState(scrambledState));
+                    } else {
+                        break; // Reached a dead end in the state graph
+                    }
+                }
+
+                // 3. Measure how many moves it takes to solve this scrambled board
+                const minMoves = solvePuzzle(scrambledState);
+                if (minMoves >= minRange && minMoves <= maxRange) {
+                    currentVehicles = scrambledState;
+                    minMovesTarget = minMoves;
+                    moveCount = 0;
+                    genStatus.innerText = "";
+                    generateBtn.disabled = false;
+                    renderBoard();
+                    return;
+                }
+            }
+
+            // Multiple dynamic fallbacks just in case the scramble misses the difficulty window
+            const fallbacks = [
+                [ { id: 0, x: 0, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' }, { id: 1, x: 2, y: 0, length: 3, orientation: 'V', isTarget: false, color: '#3b82f6' }, { id: 2, x: 3, y: 0, length: 2, orientation: 'H', isTarget: false, color: '#10b981' }, { id: 3, x: 5, y: 0, length: 3, orientation: 'V', isTarget: false, color: '#f59e0b' }, { id: 4, x: 3, y: 1, length: 2, orientation: 'V', isTarget: false, color: '#8b5cf6' }, { id: 5, x: 4, y: 2, length: 2, orientation: 'V', isTarget: false, color: '#ec4899' }, { id: 6, x: 0, y: 3, length: 3, orientation: 'V', isTarget: false, color: '#06b6d4' }, { id: 7, x: 1, y: 3, length: 2, orientation: 'H', isTarget: false, color: '#84cc16' }, { id: 8, x: 1, y: 4, length: 2, orientation: 'V', isTarget: false, color: '#a855f7' }, { id: 9, x: 2, y: 5, length: 3, orientation: 'H', isTarget: false, color: '#eab308' } ],
+                [ { id: 0, x: 1, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' }, { id: 1, x: 0, y: 0, length: 3, orientation: 'V', isTarget: false, color: '#3b82f6' }, { id: 2, x: 1, y: 0, length: 2, orientation: 'H', isTarget: false, color: '#10b981' }, { id: 3, x: 4, y: 0, length: 3, orientation: 'V', isTarget: false, color: '#f59e0b' }, { id: 4, x: 1, y: 1, length: 2, orientation: 'V', isTarget: false, color: '#8b5cf6' }, { id: 5, x: 3, y: 1, length: 2, orientation: 'V', isTarget: false, color: '#ec4899' }, { id: 6, x: 2, y: 3, length: 2, orientation: 'H', isTarget: false, color: '#06b6d4' }, { id: 7, x: 4, y: 3, length: 2, orientation: 'V', isTarget: false, color: '#84cc16' }, { id: 8, x: 0, y: 4, length: 2, orientation: 'H', isTarget: false, color: '#a855f7' }, { id: 9, x: 2, y: 4, length: 2, orientation: 'V', isTarget: false, color: '#eab308' } ]
+            ];
+            currentVehicles = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+            minMovesTarget = solvePuzzle(currentVehicles);
+            moveCount = 0;
+            genStatus.innerText = "";
+            generateBtn.disabled = false;
+            renderBoard();
+        }, 20);
+    }
+        genStatus.innerText = "Generating board...";
         
         setTimeout(() => {
             const diff = difficultySelect.value;
