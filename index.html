@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Rush Hour Puzzle Game - Expert Edition</title>
     <style>
         :root {
@@ -33,38 +33,38 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 10px;
         }
 
         .container {
             background-color: var(--card-bg);
-            padding: 30px;
+            padding: 20px;
             border-radius: var(--border-radius);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
             display: flex;
             flex-direction: column;
             align-items: center;
-            max-width: 500px;
+            max-width: 420px;
             width: 100%;
             border: 1px solid #1f2937;
         }
 
         header {
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
 
         h1 {
-            font-size: 2rem;
+            font-size: 1.75rem;
             color: #f3f4f6;
             margin-bottom: 6px;
             letter-spacing: 1px;
         }
 
         .objective {
-            font-size: 0.95rem;
+            font-size: 0.85rem;
             color: var(--text-muted);
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             line-height: 1.4;
         }
 
@@ -75,19 +75,18 @@
 
         .controls {
             display: flex;
-            gap: 12px;
+            gap: 10px;
             width: 100%;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
         }
 
         select, button {
-            padding: 12px 16px;
-            font-size: 1rem;
+            padding: 10px 12px;
+            font-size: 0.9rem;
             border-radius: 8px;
             border: 1px solid #374151;
             outline: none;
             cursor: pointer;
-            transition: all 0.2s ease;
         }
 
         select {
@@ -96,25 +95,11 @@
             flex: 1;
         }
 
-        select:focus {
-            border-color: var(--accent-color);
-        }
-
         button {
             background-color: #dc2626;
             color: white;
             font-weight: 600;
             border: none;
-            box-shadow: 0 4px 6px -1px rgba(220, 38, 38, 0.4);
-        }
-
-        button:hover {
-            background-color: #b91c1c;
-            transform: translateY(-1px);
-        }
-
-        button:active {
-            transform: translateY(1px);
         }
 
         .gen-status {
@@ -127,20 +112,20 @@
 
         .game-wrapper {
             position: relative;
-            padding: 12px;
+            padding: 8px;
             background-color: #0b0f19;
             border-radius: 16px;
             border: 4px solid #374151;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.8);
+            touch-action: none;
         }
 
         .board-container {
             position: relative;
-            width: 360px;
-            height: 360px;
+            width: 300px;
+            height: 300px;
             background-color: var(--grid-bg);
             border-radius: 8px;
-            overflow: visible;
+            touch-action: none;
         }
 
         .grid-background {
@@ -158,26 +143,19 @@
 
         .grid-cell {
             border: 1px solid var(--grid-line);
-            box-sizing: border-box;
         }
 
         .exit-marker {
             position: absolute;
-            right: -28px;
-            top: 120px;
-            height: 60px;
+            right: -24px;
+            top: 100px;
+            height: 50px;
             display: flex;
             align-items: center;
             justify-content: center;
             color: #ef4444;
-            font-size: 24px;
+            font-size: 20px;
             font-weight: bold;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { transform: translateX(0); }
-            50% { transform: translateX(5px); }
         }
 
         .vehicle {
@@ -185,21 +163,17 @@
             border-radius: 8px;
             box-sizing: border-box;
             cursor: pointer;
-            transition: top 0.15s ease-out, left 0.15s ease-out, box-shadow 0.2s ease;
+            transition: top 0.1s ease-out, left 0.1s ease-out;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 0.85rem;
+            font-size: 0.75rem;
             color: rgba(255, 255, 255, 0.9);
-            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
             box-shadow: inset 0 2px 0 rgba(255,255,255,0.3), inset 0 -2px 0 rgba(0,0,0,0.3), 0 4px 6px rgba(0,0,0,0.4);
             border: 2px solid rgba(0,0,0,0.2);
             z-index: 10;
-        }
-
-        .vehicle:hover {
-            filter: brightness(1.15);
+            touch-action: none;
         }
 
         .vehicle.selected {
@@ -213,13 +187,12 @@
         }
 
         .status-bar {
-            margin-top: 20px;
+            margin-top: 15px;
             display: flex;
             justify-content: space-between;
             width: 100%;
-            font-size: 1rem;
+            font-size: 0.9rem;
             color: var(--text-muted);
-            font-weight: 500;
         }
 
         .win-overlay {
@@ -228,8 +201,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(11, 15, 25, 0.9);
-            backdrop-filter: blur(4px);
+            background: rgba(11, 15, 25, 0.95);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -247,7 +219,7 @@
         }
 
         .win-overlay h2 {
-            font-size: 2.2rem;
+            font-size: 1.8rem;
             color: #4ade80;
             margin-bottom: 10px;
         }
@@ -255,14 +227,12 @@
         .win-overlay p {
             margin-bottom: 20px;
             color: #cbd5e1;
+            text-align: center;
+            padding: 0 10px;
         }
 
         .win-overlay button {
             background-color: #22c55e;
-        }
-
-        .win-overlay button:hover {
-            background-color: #16a34a;
         }
     </style>
 </head>
@@ -271,7 +241,7 @@
 <div class="container">
     <header>
         <h1>RUSH HOUR</h1>
-        <p class="objective">Slide vehicles along their axis to free the <span class="red-text">Red Car</span> through the exit on the right!</p>
+        <p class="objective">Slide vehicles along their axis to free the <span class="red-text">Red Car</span> through the exit!</p>
     </header>
 
     <div class="controls">
@@ -280,25 +250,19 @@
             <option value="expert" selected>Expert (21 - 35 moves)</option>
             <option value="grandmaster">Grandmaster (36+ moves)</option>
         </select>
-        <button id="generateBtn">Generate New</button>
+        <button id="generateBtn">New Board</button>
     </div>
 
     <div class="gen-status" id="genStatus"></div>
 
     <div class="game-wrapper">
         <div class="board-container" id="board">
-            <div class="grid-background">
-                <script>
-                    for(let i=0; i<36; i++) {
-                        document.write('<div class="grid-cell"></div>');
-                    }
-                </script>
-            </div>
-            <div class="exit-marker" title="Exit Slot">➔</div>
+            <div class="grid-background" id="gridBg"></div>
+            <div class="exit-marker">➔</div>
         </div>
 
         <div class="win-overlay" id="winOverlay">
-            <h2>Masterfully Solved!</h2>
+            <h2>Solved!</h2>
             <p id="winStats">You escaped in 0 moves!</p>
             <button id="playAgainBtn">Next Challenge</button>
         </div>
@@ -306,12 +270,12 @@
 
     <div class="status-bar">
         <div>Moves: <span id="moveCount" style="color: var(--text-color); font-weight: bold;">0</span></div>
-        <div>Optimal Solution: <span id="minMoves" style="color: var(--accent-color); font-weight: bold;">-</span></div>
+        <div>Target: <span id="minMoves" style="color: var(--accent-color); font-weight: bold;">-</span></div>
     </div>
 </div>
 
 <script>
-    const CELL_SIZE = 60;
+    const CELL_SIZE = 50;
 
     const VEHICLE_COLORS = [
         '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
@@ -324,6 +288,7 @@
     let minMovesTarget = 0;
 
     const boardEl = document.getElementById('board');
+    const gridBg = document.getElementById('gridBg');
     const moveCountEl = document.getElementById('moveCount');
     const minMovesEl = document.getElementById('minMoves');
     const difficultySelect = document.getElementById('difficulty');
@@ -333,7 +298,12 @@
     const winStats = document.getElementById('winStats');
     const playAgainBtn = document.getElementById('playAgainBtn');
 
-    // --- ENCODING & UTILS ---
+    // Build grid DOM
+    for (let i = 0; i < 36; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'grid-cell';
+        gridBg.appendChild(cell);
+    }
 
     function encodeState(vehicles) {
         return vehicles.map(v => `${v.x},${v.y}`).join('|');
@@ -357,21 +327,18 @@
         return grid;
     }
 
-    // --- BFS SOLVER WITH PARALLEL MOVE AGGREGATION ---
     function getValidMoves(vehicles) {
         const neighbors = [];
         const grid = getBoardGrid(vehicles);
 
         vehicles.forEach((v, idx) => {
             if (v.orientation === 'H') {
-                // Move Left (any distance)
                 for (let dist = 1; v.x - dist >= 0; dist++) {
                     if (grid[v.y][v.x - dist] !== -1) break;
                     const nextV = vehicles.map(item => ({...item}));
                     nextV[idx].x -= dist;
                     neighbors.push(nextV);
                 }
-                // Move Right (any distance)
                 for (let dist = 1; v.x + v.length - 1 + dist < 6; dist++) {
                     if (grid[v.y][v.x + v.length - 1 + dist] !== -1) break;
                     const nextV = vehicles.map(item => ({...item}));
@@ -379,14 +346,12 @@
                     neighbors.push(nextV);
                 }
             } else {
-                // Move Up (any distance)
                 for (let dist = 1; v.y - dist >= 0; dist++) {
                     if (grid[v.y - dist][v.x] !== -1) break;
                     const nextV = vehicles.map(item => ({...item}));
                     nextV[idx].y -= dist;
                     neighbors.push(nextV);
                 }
-                // Move Down (any distance)
                 for (let dist = 1; v.y + v.length - 1 + dist < 6; dist++) {
                     if (grid[v.y + v.length - 1 + dist][v.x] !== -1) break;
                     const nextV = vehicles.map(item => ({...item}));
@@ -406,10 +371,12 @@
         const visited = new Set();
         visited.add(encodeState(initialVehicles));
 
-        while (queue.length > 0) {
+        let iterations = 0;
+        while (queue.length > 0 && iterations < 3000) {
+            iterations++;
             const { state, dist } = queue.shift();
 
-            if (dist > 60) return -1;
+            if (dist > 50) return -1;
 
             const neighbors = getValidMoves(state);
             for (let nextState of neighbors) {
@@ -427,9 +394,8 @@
         return -1;
     }
 
-    // High density board generator for complex blockades
     function generatePuzzle() {
-        genStatus.innerText = "Generating high-complexity puzzle...";
+        genStatus.innerText = "Generating board...";
         
         setTimeout(() => {
             const diff = difficultySelect.value;
@@ -438,51 +404,47 @@
             if (diff === 'grandmaster') { minRange = 36; maxRange = 60; }
 
             let attempts = 0;
-            while (attempts < 2000) {
+            while (attempts < 150) {
                 attempts++;
-                const numObstacles = Math.floor(Math.random() * 4) + 9; // High density (9 to 12 vehicles)
+                const numObstacles = Math.floor(Math.random() * 3) + 8;
                 const vehicles = [];
 
-                // Red Target Car
                 const redX = Math.floor(Math.random() * 3);
                 vehicles.push({ id: 0, x: redX, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' });
 
                 let colorIdx = 0;
                 for (let i = 0; i < numObstacles; i++) {
-                    const isTruck = Math.random() < 0.35;
+                    const isTruck = Math.random() < 0.3;
                     const length = isTruck ? 3 : 2;
                     const orientation = Math.random() < 0.5 ? 'H' : 'V';
                     
-                    for (let tryPlace = 0; tryPlace < 15; tryPlace++) {
-                        const maxX = orientation === 'H' ? 6 - length : 5;
-                        const maxY = orientation === 'V' ? 6 - length : 5;
-                        const rx = Math.floor(Math.random() * (maxX + 1));
-                        const ry = Math.floor(Math.random() * (maxY + 1));
+                    const maxX = orientation === 'H' ? 6 - length : 5;
+                    const maxY = orientation === 'V' ? 6 - length : 5;
+                    const rx = Math.floor(Math.random() * (maxX + 1));
+                    const ry = Math.floor(Math.random() * (maxY + 1));
 
-                        let overlap = false;
-                        const grid = getBoardGrid(vehicles);
-                        for (let l = 0; l < length; l++) {
-                            const checkX = orientation === 'H' ? rx + l : rx;
-                            const checkY = orientation === 'V' ? ry + l : ry;
-                            if (grid[checkY][checkX] !== -1) {
-                                overlap = true;
-                                break;
-                            }
-                        }
-
-                        if (!overlap) {
-                            vehicles.push({
-                                id: vehicles.length,
-                                x: rx,
-                                y: ry,
-                                length: length,
-                                orientation: orientation,
-                                isTarget: false,
-                                color: VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length]
-                            });
-                            colorIdx++;
+                    let overlap = false;
+                    const grid = getBoardGrid(vehicles);
+                    for (let l = 0; l < length; l++) {
+                        const checkX = orientation === 'H' ? rx + l : rx;
+                        const checkY = orientation === 'V' ? ry + l : ry;
+                        if (grid[checkY][checkX] !== -1) {
+                            overlap = true;
                             break;
                         }
+                    }
+
+                    if (!overlap) {
+                        vehicles.push({
+                            id: vehicles.length,
+                            x: rx,
+                            y: ry,
+                            length: length,
+                            orientation: orientation,
+                            isTarget: false,
+                            color: VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length]
+                        });
+                        colorIdx++;
                     }
                 }
 
@@ -497,7 +459,7 @@
                 }
             }
 
-            // High-difficulty fallback preset if random generation takes too long
+            // Fallback preset
             genStatus.innerText = "";
             currentVehicles = [
                 { id: 0, x: 0, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' },
@@ -514,7 +476,7 @@
             minMovesTarget = solvePuzzle(currentVehicles);
             moveCount = 0;
             renderBoard();
-        }, 50);
+        }, 20);
     }
 
     function renderBoard() {
@@ -542,56 +504,51 @@
                 vEl.innerHTML = '★ ESCAPE ★';
             }
 
-            attachDragAndClickEvents(vEl, v);
+            attachDragEvents(vEl, v);
             boardEl.appendChild(vEl);
         });
 
         winOverlay.classList.remove('active');
     }
 
-
-    function attachDragAndClickEvents(el, vehicle) {
+    function attachDragEvents(el, vehicle) {
         let startX, startY, origX, origY;
         let isDragging = false;
 
         const onPointerDown = (e) => {
             e.preventDefault();
             isDragging = true;
-            startX = e.clientX || e.touches[0].clientX;
-            startY = e.clientY || e.touches[0].clientY;
+            el.setPointerCapture(e.pointerId);
+            
+            startX = e.clientX;
+            startY = e.clientY;
             origX = vehicle.x;
             origY = vehicle.y;
 
             document.querySelectorAll('.vehicle').forEach(v => v.classList.remove('selected'));
             el.classList.add('selected');
 
-            window.addEventListener('pointermove', onPointerMove);
-            window.addEventListener('pointerup', onPointerUp);
+            el.addEventListener('pointermove', onPointerMove);
+            el.addEventListener('pointerup', onPointerUp);
+            el.addEventListener('pointercancel', onPointerUp);
         };
 
         const onPointerMove = (e) => {
             if (!isDragging) return;
-            const clientX = e.clientX || (e.touches && e.touches[0].clientX);
-            const clientY = e.clientY || (e.touches && e.touches[0].clientY);
             
-            const deltaX = clientX - startX;
-            const deltaY = clientY - startY;
-
+            const deltaX = e.clientX - startX;
+            const deltaY = e.clientY - startY;
             const grid = getBoardGrid(currentVehicles);
 
             if (vehicle.orientation === 'H') {
                 const cellDelta = Math.round(deltaX / CELL_SIZE);
-                let targetX = origX + cellDelta;
-
-                targetX = Math.max(0, Math.min(6 - vehicle.length, targetX));
+                let targetX = Math.max(0, Math.min(6 - vehicle.length, origX + cellDelta));
                 
                 let validX = origX;
                 const step = targetX > origX ? 1 : -1;
                 for (let x = origX + step; step > 0 ? x <= targetX : x >= targetX; x += step) {
                     const leadingEdge = step > 0 ? x + vehicle.length - 1 : x;
-                    if (grid[vehicle.y][leadingEdge] !== -1 && grid[vehicle.y][leadingEdge] !== vehicle.id) {
-                        break;
-                    }
+                    if (grid[vehicle.y][leadingEdge] !== -1 && grid[vehicle.y][leadingEdge] !== vehicle.id) break;
                     validX = x;
                 }
 
@@ -599,20 +556,15 @@
                     vehicle.x = validX;
                     el.style.left = `${vehicle.x * CELL_SIZE + 2}px`;
                 }
-
             } else {
                 const cellDelta = Math.round(deltaY / CELL_SIZE);
-                let targetY = origY + cellDelta;
-
-                targetY = Math.max(0, Math.min(6 - vehicle.length, targetY));
+                let targetY = Math.max(0, Math.min(6 - vehicle.length, origY + cellDelta));
 
                 let validY = origY;
                 const step = targetY > origY ? 1 : -1;
                 for (let y = origY + step; step > 0 ? y <= targetY : y >= targetY; y += step) {
                     const leadingEdge = step > 0 ? y + vehicle.length - 1 : y;
-                    if (grid[leadingEdge][vehicle.x] !== -1 && grid[leadingEdge][vehicle.x] !== vehicle.id) {
-                        break;
-                    }
+                    if (grid[leadingEdge][vehicle.x] !== -1 && grid[leadingEdge][vehicle.x] !== vehicle.id) break;
                     validY = y;
                 }
 
@@ -623,11 +575,14 @@
             }
         };
 
-        const onPointerUp = () => {
+        const onPointerUp = (e) => {
             if (!isDragging) return;
             isDragging = false;
-            window.removeEventListener('pointermove', onPointerMove);
-            window.removeEventListener('pointerup', onPointerUp);
+            try { el.releasePointerCapture(e.pointerId); } catch(_) {}
+
+            el.removeEventListener('pointermove', onPointerMove);
+            el.removeEventListener('pointerup', onPointerUp);
+            el.removeEventListener('pointercancel', onPointerUp);
 
             if (vehicle.x !== origX || vehicle.y !== origY) {
                 moveCount++;
@@ -647,7 +602,7 @@
                 targetEl.style.left = `${6 * CELL_SIZE + 2}px`;
                 
                 setTimeout(() => {
-                    winStats.innerText = `You completed the puzzle in ${moveCount} moves! (Optimal Par: ${minMovesTarget})`;
+                    winStats.innerText = `Solved in ${moveCount} moves! (Par: ${minMovesTarget})`;
                     winOverlay.classList.add('active');
                 }, 300);
             }, 100);
