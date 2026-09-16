@@ -270,7 +270,7 @@
 
     <div class="status-bar">
         <div>Moves: <span id="moveCount" style="color: var(--text-color); font-weight: bold;">0</span></div>
-        <div>Target: <span id="minMoves" style="color: var(--accent-color); font-weight: bold;">-</span></div>
+        <div>Minimum: <span id="minMoves" style="color: var(--accent-color); font-weight: bold;">-</span></div>
     </div>
 </div>
 
@@ -306,6 +306,8 @@
     }
 
     function encodeState(vehicles) {
+        // Vehicle identities, lengths and orientations never change, so positions
+        // are sufficient to uniquely identify a puzzle state.
         return vehicles.map(v => `${v.x},${v.y}`).join('|');
     }
 
@@ -364,29 +366,136 @@
         return neighbors;
     }
 
-    function solvePuzzle(initialVehicles) {
+    // Create a random valid vehicle layout with the red car already at the exit.
+    // This is the solved endpoint from which we construct a puzzle by reversing moves.
+    function createRandomSolvedLayout() {
+        const vehicles = [
+            { id: 0, x: 4, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' }
+        ];
+
+        const numObstacles = Math.floor(Math.random() * 3) + 8; // 8-10
+        let colorIdx = 0;
+        let placementAttempts = 0;
+
+        while (vehicles.length < numObstacles + 1 && placementAttempts < 5000) {
+            placementAttempts++;
+
+            const length = Math.random() < 0.30 ? 3 : 2;
+            const orientation = Math.random() < 0.5 ? 'H' : 'V';
+
+            const maxX = orientation === 'H' ? 6 - length : 5;
+            const maxY = orientation === 'V' ? 6 - length : 5;
+            const x = Math.floor(Math.random() * (maxX + 1));
+            const y = Math.floor(Math.random() * (maxY + 1));
+
+            const grid = getBoardGrid(vehicles);
+            let overlap = false;
+
+            for (let i = 0; i < length; i++) {
+                const cx = orientation === 'H' ? x + i : x;
+                const cy = orientation === 'V' ? y + i : y;
+
+                // The initial solved position must leave cells 0-3 of the
+                // red-car row empty. That makes the reverse move x=4 -> x=0
+                // legal, rather than teleporting the red car through obstacles.
+                if (cy === 2 && cx <= 3) {
+                    overlap = true;
+                    break;
+                }
+
+                if (grid[cy][cx] !== -1) {
+                    overlap = true;
+                    break;
+                }
+            }
+
+            if (!overlap) {
+                vehicles.push({
+                    id: vehicles.length,
+                    x,
+                    y,
+                    length,
+                    orientation,
+                    isTarget: false,
+                    color: VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length]
+                });
+                colorIdx++;
+            }
+        }
+
+        return vehicles.length === numObstacles + 1 ? vehicles : null;
+    }
+
+    // Pick one legal reverse move. The red car is deliberately excluded after
+    // its initial reverse move so the scramble cannot undo most of its own difficulty.
+    function getRandomReverseMove(vehicles, previousKey, allowTarget) {
+        const moves = [];
+        const grid = getBoardGrid(vehicles);
+
+        vehicles.forEach((v, idx) => {
+            if (v.isTarget && !allowTarget) return;
+
+            if (v.orientation === 'H') {
+                for (let dist = 1; v.x - dist >= 0; dist++) {
+                    if (grid[v.y][v.x - dist] !== -1) break;
+                    const nextState = vehicles.map(item => ({...item}));
+                    nextState[idx].x -= dist;
+                    const key = encodeState(nextState);
+                    if (key !== previousKey) moves.push(nextState);
+                }
+
+                for (let dist = 1; v.x + v.length - 1 + dist < 6; dist++) {
+                    if (grid[v.y][v.x + v.length - 1 + dist] !== -1) break;
+                    const nextState = vehicles.map(item => ({...item}));
+                    nextState[idx].x += dist;
+                    const key = encodeState(nextState);
+                    if (key !== previousKey) moves.push(nextState);
+                }
+            } else {
+                for (let dist = 1; v.y - dist >= 0; dist++) {
+                    if (grid[v.y - dist][v.x] !== -1) break;
+                    const nextState = vehicles.map(item => ({...item}));
+                    nextState[idx].y -= dist;
+                    const key = encodeState(nextState);
+                    if (key !== previousKey) moves.push(nextState);
+                }
+
+                for (let dist = 1; v.y + v.length - 1 + dist < 6; dist++) {
+                    if (grid[v.y + v.length - 1 + dist][v.x] !== -1) break;
+                    const nextState = vehicles.map(item => ({...item}));
+                    nextState[idx].y += dist;
+                    const key = encodeState(nextState);
+                    if (key !== previousKey) moves.push(nextState);
+                }
+            }
+        });
+
+        return moves.length ? moves[Math.floor(Math.random() * moves.length)] : null;
+    }
+
+    // Exact shortest-path solver used only AFTER a board has been constructed.
+    // It verifies the actual puzzle difficulty without driving generation.
+    function solvePuzzle(initialVehicles, maxIterations = 75000) {
         if (isSolved(initialVehicles)) return 0;
 
         const queue = [{ state: initialVehicles, dist: 0 }];
-        const visited = new Set();
-        visited.add(encodeState(initialVehicles));
-
+        let head = 0;
+        const visited = new Set([encodeState(initialVehicles)]);
         let iterations = 0;
-        while (queue.length > 0 && iterations < 3000) {
-            iterations++;
-            const { state, dist } = queue.shift();
 
-            if (dist > 50) return -1;
+        while (head < queue.length && iterations < maxIterations) {
+            const { state, dist } = queue[head++];
+            iterations++;
 
             const neighbors = getValidMoves(state);
-            for (let nextState of neighbors) {
-                if (isSolved(nextState)) {
-                    return dist + 1;
-                }
+            for (const nextState of neighbors) {
+                const nextDist = dist + 1;
+                if (isSolved(nextState)) return nextDist;
+
                 const key = encodeState(nextState);
                 if (!visited.has(key)) {
                     visited.add(key);
-                    queue.push({ state: nextState, dist: dist + 1 });
+                    queue.push({ state: nextState, dist: nextDist });
                 }
             }
         }
@@ -395,86 +504,133 @@
     }
 
     function generatePuzzle() {
-        genStatus.innerText = "Generating board...";
-        
+        genStatus.innerText = "Building a new puzzle...";
+
         setTimeout(() => {
             const diff = difficultySelect.value;
-            let minRange = 12, maxRange = 20;
-            if (diff === 'expert') { minRange = 21; maxRange = 35; }
-            if (diff === 'grandmaster') { minRange = 36; maxRange = 60; }
+            let minTarget = 12, maxTarget = 20;
+            let scrambleMin = 30, scrambleMax = 45;
+            if (diff === 'expert') { minTarget = 21; maxTarget = 35; scrambleMin = 45; scrambleMax = 65; }
+            if (diff === 'grandmaster') { minTarget = 36; maxTarget = 60; scrambleMin = 70; scrambleMax = 100; }
 
-            let attempts = 0;
-            while (attempts < 150) {
-                attempts++;
-                const numObstacles = Math.floor(Math.random() * 3) + 8;
-                const vehicles = [];
+            let bestBoard = null;
+            let bestScore = Infinity;
 
-                const redX = Math.floor(Math.random() * 3);
-                vehicles.push({ id: 0, x: redX, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' });
+            // Construct many boards from solved endpoints, but only solve the
+            // constructed candidates. We never solve arbitrary random layouts.
+            for (let attempt = 0; attempt < 10; attempt++) {
+                let vehicles = createRandomSolvedLayout();
+                if (!vehicles) continue;
 
-                let colorIdx = 0;
-                for (let i = 0; i < numObstacles; i++) {
-                    const isTruck = Math.random() < 0.3;
-                    const length = isTruck ? 3 : 2;
-                    const orientation = Math.random() < 0.5 ? 'H' : 'V';
-                    
-                    const maxX = orientation === 'H' ? 6 - length : 5;
-                    const maxY = orientation === 'V' ? 6 - length : 5;
-                    const rx = Math.floor(Math.random() * (maxX + 1));
-                    const ry = Math.floor(Math.random() * (maxY + 1));
+                // Mandatory first reverse move: put the red car at the far left.
+                // This makes a one-move puzzle impossible by construction, and from
+                // here onward the red car never moves during the backward scramble.
+                vehicles[0].x = 0;
 
-                    let overlap = false;
+                // Continue scrambling only the obstacle vehicles. Use a much deeper
+                // construction path than the requested minimum because random walks
+                // can contain moves that are unnecessary in the final shortest path.
+                let previousKey = encodeState(vehicles);
+                const visitedDuringScramble = new Set([previousKey]);
+                const targetDepth = scrambleMin + Math.floor(Math.random() * (scrambleMax - scrambleMin + 1));
+                let scrambleDepth = 1;
+
+                while (scrambleDepth < targetDepth) {
+                    let options = [];
                     const grid = getBoardGrid(vehicles);
-                    for (let l = 0; l < length; l++) {
-                        const checkX = orientation === 'H' ? rx + l : rx;
-                        const checkY = orientation === 'V' ? ry + l : ry;
-                        if (grid[checkY][checkX] !== -1) {
-                            overlap = true;
-                            break;
-                        }
-                    }
 
-                    if (!overlap) {
-                        vehicles.push({
-                            id: vehicles.length,
-                            x: rx,
-                            y: ry,
-                            length: length,
-                            orientation: orientation,
-                            isTarget: false,
-                            color: VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length]
-                        });
-                        colorIdx++;
-                    }
+                    vehicles.forEach((v, idx) => {
+                        if (idx === 0) return;
+
+                        if (v.orientation === 'H') {
+                            for (let dist = 1; v.x - dist >= 0; dist++) {
+                                if (grid[v.y][v.x - dist] !== -1) break;
+                                const nextState = vehicles.map(item => ({...item}));
+                                nextState[idx].x -= dist;
+                                const key = encodeState(nextState);
+                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
+                            }
+                            for (let dist = 1; v.x + v.length - 1 + dist < 6; dist++) {
+                                if (grid[v.y][v.x + v.length - 1 + dist] !== -1) break;
+                                const nextState = vehicles.map(item => ({...item}));
+                                nextState[idx].x += dist;
+                                const key = encodeState(nextState);
+                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
+                            }
+                        } else {
+                            for (let dist = 1; v.y - dist >= 0; dist++) {
+                                if (grid[v.y - dist][v.x] !== -1) break;
+                                const nextState = vehicles.map(item => ({...item}));
+                                nextState[idx].y -= dist;
+                                const key = encodeState(nextState);
+                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
+                            }
+                            for (let dist = 1; v.y + v.length - 1 + dist < 6; dist++) {
+                                if (grid[v.y + v.length - 1 + dist][v.x] !== -1) break;
+                                const nextState = vehicles.map(item => ({...item}));
+                                nextState[idx].y += dist;
+                                const key = encodeState(nextState);
+                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
+                            }
+                        }
+                    });
+
+                    if (!options.length) break;
+                    const chosen = options[Math.floor(Math.random() * options.length)];
+                    previousKey = chosen.key;
+                    visitedDuringScramble.add(chosen.key);
+                    vehicles = chosen.nextState;
+                    scrambleDepth++;
                 }
 
-                const minMoves = solvePuzzle(vehicles);
-                if (minMoves >= minRange && minMoves <= maxRange) {
-                    currentVehicles = vehicles;
-                    minMovesTarget = minMoves;
-                    moveCount = 0;
-                    genStatus.innerText = "";
-                    renderBoard();
-                    return;
+                // The red car starts at x=0. Require at least one vehicle to block
+                // the exit lane, otherwise the puzzle could still be solved in one move.
+                const finalGrid = getBoardGrid(vehicles);
+                const hasExitBlocker = finalGrid[2][2] !== -1 || finalGrid[2][3] !== -1;
+                if (!hasExitBlocker) continue;
+
+                // Verify the actual shortest solution length. This is the quantity
+                // shown to the player, not the arbitrary scramble depth.
+                const actualDepth = solvePuzzle(vehicles);
+                if (actualDepth >= minTarget && actualDepth <= maxTarget) {
+                    bestBoard = vehicles;
+                    bestScore = actualDepth;
+                    break;
+                }
+
+                // Keep the closest valid candidate as a safety fallback.
+                const distance = actualDepth < 0
+                    ? 1000
+                    : actualDepth < minTarget
+                        ? minTarget - actualDepth
+                        : actualDepth > maxTarget
+                            ? actualDepth - maxTarget
+                            : 0;
+                if (distance < bestScore) {
+                    bestScore = distance;
+                    bestBoard = vehicles;
+                    bestBoard._actualDepth = actualDepth;
                 }
             }
 
-            // Fallback preset
-            genStatus.innerText = "";
-            currentVehicles = [
-                { id: 0, x: 0, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' },
-                { id: 1, x: 2, y: 0, length: 3, orientation: 'V', isTarget: false, color: '#3b82f6' },
-                { id: 2, x: 3, y: 0, length: 2, orientation: 'H', isTarget: false, color: '#10b981' },
-                { id: 3, x: 5, y: 0, length: 3, orientation: 'V', isTarget: false, color: '#f59e0b' },
-                { id: 4, x: 3, y: 1, length: 2, orientation: 'V', isTarget: false, color: '#8b5cf6' },
-                { id: 5, x: 4, y: 2, length: 2, orientation: 'V', isTarget: false, color: '#ec4899' },
-                { id: 6, x: 0, y: 3, length: 3, orientation: 'V', isTarget: false, color: '#06b6d4' },
-                { id: 7, x: 1, y: 3, length: 2, orientation: 'H', isTarget: false, color: '#84cc16' },
-                { id: 8, x: 1, y: 4, length: 2, orientation: 'V', isTarget: false, color: '#a855f7' },
-                { id: 9, x: 2, y: 5, length: 3, orientation: 'H', isTarget: false, color: '#eab308' }
-            ];
-            minMovesTarget = solvePuzzle(currentVehicles);
+            // Final fallback: keep constructing until we have a solvable board.
+            if (!bestBoard) {
+                bestBoard = createRandomSolvedLayout();
+                minTarget = 0;
+                bestScore = 0;
+            }
+
+            const verifiedDepth = typeof bestBoard._actualDepth === 'number'
+                ? bestBoard._actualDepth
+                : solvePuzzle(bestBoard);
+            delete bestBoard._actualDepth;
+
+            currentVehicles = bestBoard;
+            minMovesTarget = verifiedDepth > 0 ? verifiedDepth : 0;
             moveCount = 0;
+            genStatus.innerText = verifiedDepth >= minTarget && verifiedDepth <= maxTarget
+                ? ""
+                : "Generated a solvable board; generating a deeper one next time.";
             renderBoard();
         }, 20);
     }
@@ -602,7 +758,7 @@
                 targetEl.style.left = `${6 * CELL_SIZE + 2}px`;
                 
                 setTimeout(() => {
-                    winStats.innerText = `Solved in ${moveCount} moves! (Par: ${minMovesTarget})`;
+                    winStats.innerText = `Solved in ${moveCount} moves! (Depth: ${minMovesTarget})`;
                     winOverlay.classList.add('active');
                 }, 300);
             }, 100);
