@@ -102,6 +102,10 @@
             border: none;
         }
 
+        button:disabled {
+            opacity: 0.55;
+            cursor: wait;
+        }
         .gen-status {
             font-size: 0.85rem;
             color: var(--accent-color);
@@ -274,19 +278,187 @@
     </div>
 </div>
 
+<script id="rh-engine">
+// ===================== RUSH HOUR ENGINE (shared by main thread + worker) =====================
+// Model: vehicle = { o:'H'|'V', len:2|3, fixed:row(H)/col(V) }, position = offset along its axis (0..4).
+// A board state is the array of positions, packed into one number (base 5) for fast hashing.
+var RH = (function () {
+    var P5 = []; for (var i = 0, p = 1; i < 16; i++, p *= 5) P5.push(p);
+    var EXIT_ROW = 2, MAX_VEH = 14;
+
+    function encode(pos) { var k = 0; for (var i = pos.length - 1; i >= 0; i--) k = k * 5 + pos[i]; return k; }
+    function decode(n, k) { var p = []; for (var i = 0; i < n; i++) { var r = k % 5; p.push(r); k = (k - r) / 5; } return p; }
+    function cells(v, p) { var c = []; for (var i = 0; i < v.len; i++) c.push(v.o === 'H' ? v.fixed * 6 + p + i : (p + i) * 6 + v.fixed); return c; }
+    function occupancy(veh, pos) { var g = new Int8Array(36).fill(-1); for (var i = 0; i < veh.length; i++) cells(veh[i], pos[i]).forEach(function (c) { g[c] = i; }); return g; }
+
+    // Open-addressing hash table: packed state key -> cluster index
+    function KeyTable(cap) { var s = 1; while (s < cap * 2) s <<= 1; this.mask = s - 1; this.k = new Float64Array(s).fill(-1); this.v = new Int32Array(s); }
+    KeyTable.prototype.h = function (k) { var lo = k >>> 0, hi = (k / 4294967296) >>> 0; return (Math.imul(lo ^ Math.imul(hi, 0x9E3779B1), 0x85EBCA6B) ^ (lo >>> 15)) & this.mask; };
+    KeyTable.prototype.get = function (k) { var i = this.h(k), K = this.k; while (K[i] !== -1) { if (K[i] === k) return this.v[i]; i = (i + 1) & this.mask; } return -1; };
+    KeyTable.prototype.add = function (k, v) { var i = this.h(k), K = this.k; while (K[i] !== -1) { if (K[i] === k) return false; i = (i + 1) & this.mask; } K[i] = k; this.v[i] = v; return true; };
+
+    // Enumerate the full cluster of states reachable from startPos, then run a RETROGRADE
+    // multi-source BFS outward from every solved state (red car at x=4). Result: the exact
+    // minimum number of moves for every state in the cluster, with no guessing.
+    function analyzeCluster(veh, startPos, cap) {
+        cap = cap || 40000;
+        var n = veh.length, o = [], len = [], fx = [];
+        for (var i = 0; i < n; i++) { o.push(veh[i].o === 'H' ? 0 : 1); len.push(veh[i].len); fx.push(veh[i].fixed); }
+        var g = new Uint8Array(36), pos = new Int8Array(n), nb = new Float64Array(80);
+        var keys = new Float64Array(cap), tbl = new KeyTable(cap);
+        var start = encode(startPos); keys[0] = start; tbl.add(start, 0); var cnt = 1;
+        function gen(k) {
+            var t = k, i, j, q, c = 0;
+            for (i = 0; i < n; i++) { var r = t % 5; pos[i] = r; t = (t - r) / 5; }
+            g.fill(0);
+            for (i = 0; i < n; i++) { if (o[i] === 0) { var b = fx[i] * 6 + pos[i]; for (j = 0; j < len[i]; j++) g[b + j] = 1; } else for (j = 0; j < len[i]; j++) g[(pos[i] + j) * 6 + fx[i]] = 1; }
+            for (i = 0; i < n; i++) {
+                var p = pos[i], L = len[i], f = fx[i], w = P5[i];
+                if (o[i] === 0) { var row = f * 6;
+                    for (q = p - 1; q >= 0 && !g[row + q]; q--) nb[c++] = k + (q - p) * w;
+                    for (q = p + 1; q + L <= 6 && !g[row + q + L - 1]; q++) nb[c++] = k + (q - p) * w;
+                } else {
+                    for (q = p - 1; q >= 0 && !g[q * 6 + f]; q--) nb[c++] = k + (q - p) * w;
+                    for (q = p + 1; q + L <= 6 && !g[(q + L - 1) * 6 + f]; q++) nb[c++] = k + (q - p) * w;
+                }
+            }
+            return c;
+        }
+        for (var h = 0; h < cnt; h++) { var c = gen(keys[h]); for (var j = 0; j < c; j++) if (tbl.add(nb[j], cnt)) { if (cnt >= cap) return null; keys[cnt++] = nb[j]; } }
+        var dist = new Int16Array(cnt).fill(-1), queue = new Int32Array(cnt), qt = 0, max = 0;
+        for (i = 0; i < cnt; i++) if (keys[i] % 5 === 4) { dist[i] = 0; queue[qt++] = i; }
+        if (!qt) return null;
+        for (h = 0; h < qt; h++) {
+            var idx = queue[h], d = dist[idx] + 1; c = gen(keys[idx]);
+            for (j = 0; j < c; j++) { var x = tbl.get(nb[j]); if (dist[x] < 0) { dist[x] = d; if (d > max) max = d; queue[qt++] = x; } }
+        }
+        return { keys: keys.subarray(0, cnt), dist: dist, max: max, size: cnt };
+    }
+
+    // ---- Layout edits: physically shift / add / remove cars on a real board state ----
+    function rint(n) { return Math.floor(Math.random() * n); }
+    function tryAdd(veh, pos) {
+        var g = occupancy(veh, pos);
+        for (var t = 0; t < 60; t++) {
+            var len = Math.random() < 0.3 ? 3 : 2, o = Math.random() < 0.5 ? 'H' : 'V', fixed = rint(6), p = rint(7 - len);
+            if (o === 'H' && fixed === EXIT_ROW) continue; // a horizontal car in the exit row could never clear it
+            var v = { o: o, len: len, fixed: fixed };
+            if (cells(v, p).every(function (c) { return g[c] === -1; })) return { veh: veh.concat([v]), pos: pos.concat([p]) };
+        }
+        return null;
+    }
+    function removeOne(veh, pos) { var i = 1 + rint(veh.length - 1); veh = veh.slice(); pos = pos.slice(); veh.splice(i, 1); pos.splice(i, 1); return { veh: veh, pos: pos }; }
+    function mutate(veh, pos) {
+        var r = Math.random(), L = { veh: veh, pos: pos };
+        if (veh.length >= MAX_VEH || (r < 0.30 && veh.length > 5)) return removeOne(veh, pos);       // remove a car
+        if (r < 0.60 && veh.length > 5) L = removeOne(veh, pos);                                   // relocate a car
+        return tryAdd(L.veh, L.pos) || L;                                                          // add a car
+    }
+    function randomLayout() {
+        var L = { veh: [{ o: 'H', len: 2, fixed: EXIT_ROW }], pos: [rint(5)] }, target = 9 + rint(4);
+        for (var t = 0; t < 200 && L.veh.length < target; t++) L = tryAdd(L.veh, L.pos) || L;
+        return L;
+    }
+    function deepestIndex(c) { var best = [], i; for (i = 0; i < c.size; i++) if (c.dist[i] === c.max) best.push(i); return best[rint(best.length)]; }
+
+    // ---- Generator: hill-climb over layouts, scored by exact cluster depth ----
+    // Every candidate is a real board reached by shifting/adding/removing cars, and its
+    // difficulty is computed exactly by the retrograde BFS above, so the search is steered
+    // toward the requested depth instead of hoping a random board happens to be hard.
+    function Generator(minD, maxD, seeds) {
+        this.minD = minD; this.maxD = maxD;
+        // Aim for a random depth inside the tier so puzzles spread across the whole range.
+        this.goal = minD + rint(Math.min(maxD, minD + 9) - minD + 1);
+        if (minD >= 30) this.goal = minD;           // Grandmaster: any 36+ cluster qualifies
+        this.seeds = (seeds || []).filter(function (s) { return s.max >= minD; });
+        this.cur = null; this.best = null; this.stall = 0; this.variations = 0; this.varStart = 0; this.discovered = [];
+    }
+    Generator.prototype.restart = function () {
+        var seedChance = this.minD >= 30 ? 1 : this.minD >= 20 ? 0.5 : 0.3, L;
+        if (this.seeds.length && Math.random() < seedChance) { var s = this.seeds[rint(this.seeds.length)]; L = { veh: s.veh, pos: s.pos }; }
+        else L = randomLayout();
+        var c = analyzeCluster(L.veh, L.pos);
+        if (!c) return;
+        this.cur = { veh: L.veh, c: c }; this.stall = 0; this.variations = 0; this.varStart = 0;
+        this.track();
+    };
+    Generator.prototype.track = function () {
+        if (!this.best || this.cur.c.max > this.best.c.max) this.best = this.cur;
+        if (this.cur.c.max >= 36 && this.discovered.length < 20) {
+            var d = deepestIndex(this.cur.c);
+            this.discovered.push({ veh: this.cur.veh, pos: decode(this.cur.veh.length, this.cur.c.keys[d]), max: this.cur.c.max });
+        }
+    };
+    // Works for ~ms milliseconds. Returns a finished puzzle, or null (call again).
+    Generator.prototype.step = function (ms) {
+        var t0 = Date.now();
+        if (!this.started) this.started = t0;
+        // Progressive relaxation: after a few seconds, accept any depth already reached inside the tier.
+        if (t0 - this.started > 4000 && this.best && this.best.c.max >= this.minD && this.goal > this.best.c.max) {
+            this.goal = this.best.c.max; this.cur = this.best;
+        } else if (t0 - this.started > 3000 && !this.forcedSeed && this.seeds.length) {
+            // Still short of the tier after 3 s: jump to a verified deep seed. Its cluster
+            // contains positions at every depth up to its max, so the tier is guaranteed.
+            this.forcedSeed = true;
+            var s = this.seeds[rint(this.seeds.length)], fc = analyzeCluster(s.veh, s.pos);
+            if (fc) { this.cur = { veh: s.veh, c: fc }; this.stall = 0; this.variations = 0; this.varStart = 0; this.track(); }
+        }
+        while (Date.now() - t0 < ms) {
+            if (!this.cur || this.stall > 150) { this.restart(); continue; }
+            var c0 = this.cur.c, i = Math.random() < 0.6 ? deepestIndex(c0) : rint(c0.size);
+            var m = mutate(this.cur.veh, decode(this.cur.veh.length, c0.keys[i]));
+            var c = analyzeCluster(m.veh, m.pos);
+            if (c0.max >= this.goal) {
+                // Deep enough already (e.g. started from a seed): shift a few more cars while
+                // keeping the depth, so each board is a fresh layout rather than a repeat.
+                if (!this.varStart) this.varStart = Date.now();
+                if (c && c.max >= this.goal) { this.cur = { veh: m.veh, c: c }; this.variations++; this.track(); }
+                if (this.variations >= 4 || Date.now() - this.varStart > 1200) return this.finish();
+                continue;
+            }
+            if (!c) { this.stall++; continue; }
+            if (c.max >= c0.max) { this.stall = c.max > c0.max ? 0 : this.stall + 1; this.cur = { veh: m.veh, c: c }; this.track(); }
+            else this.stall++;
+        }
+        return null;
+    };
+    // Choose a start position whose exact optimal solution length is inside the tier.
+    Generator.prototype.finish = function (useBest) {
+        var L = useBest ? this.best : this.cur, c = L.c;
+        var hi = Math.min(c.max, this.maxD), lo = Math.min(this.goal, hi);
+        var target = lo + rint(Math.min(hi, lo + 3) - lo + 1), pick = [];
+        for (var i = 0; i < c.size; i++) if (c.dist[i] === target) pick.push(i);
+        return { veh: L.veh, pos: decode(L.veh.length, c.keys[pick[rint(pick.length)]]), depth: target,
+                 inRange: target >= this.minD && target <= this.maxD };
+    };
+    Generator.prototype.bestDepth = function () { return this.best ? this.best.c.max : 0; };
+
+    return { Generator: Generator, analyzeCluster: analyzeCluster, decode: decode };
+})();
+
+// Built-in verified deep layouts (format: maxDepth:tokens, token = orientation,length,row/col,offset; first token = red car)
+var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H251,V233,V223,V341;44:H223,H251,V223,H253,V240,V233,H244,V250,V300,V252,V211,H201,H230,V221;44:H220,V232,V254,H351,H341,H312,H234,H202,V244,V222,V200,H204,V251;42:H220,H250,V321,H341,H300,V252,V254,H214,V203,H233,V244,H252,V230;41:H220,H301,V252,V224,V242,V240,V233,V250,H244,V203,H231,V231,H250,H210;41:H220,H301,V252,V223,V242,H230,V231,H211,H244,V200,V250,V233,H251,H253;40:H221,H350,H242,V220,V252,V302,H303,V331,V254,V243,V213,V200,H253;40:H221,H350,H242,V220,V252,V302,H303,V331,V254,V213,V243,H253;40:H220,H233,H242,H214,H250,V330,V244,V252,V222,V203,H300,H204,V254,H252;39:H222,H351,V233,V211,V241,H244,V303,H200,V351,V230,V220,H231,V201,H254;39:H220,H250,V321,H341,H302,V250,V252,H213,V203,H233,V244,H252;38:H222,H351,V233,V211,V241,H244,V303,H200,V351,V230,V220,H231,V201;38:H221,V330,V323,H250,H240,V254,H200,V201,H233,V252,H253,H214;38:H220,V330,V322,H251,V253,H201,V200,H233,V251,H254,H211;38:H220,H251,V320,H342,H253,V242,V213,H303,V252,V254,H214,V203,H232;38:H220,H233,H242,H214,H250,V330,V244,V253,V221,V203,H300,H204,H231;38:H220,H231,H234,H241,H203,H213,V254,H250,V332,V244,V250,V221,V203,H300;37:H223,H253,H201,V230,V212,V254,V223,V202,H250,H214,V221,V252,H243,V200;37:H223,H201,H243,H214,V202,V223,V252,V212,V200,V230,V254,V221,H250,H352;37:H221,V213,H211,H232,V224,V242,H243,V201,V240,V252,H250,V250,H300;37:H221,H350,H242,V220,V251,V302,H303,V331,V253,V243,V213,V200;37:H221,H350,H242,V220,V251,V302,H303,V331,V253,V243,V213;37:H221,H200,H230,V331,H211,V223,H203,V201,H254,H252,V214,V251,V241;37:H220,H312,V244,H242,H351,H204,H202,V222,V251,V210,V204,H234,V254,V232;37:H220,H301,V252,V224,V242,V240,V234,V250,H244,V231,V200,H250,H231;36:H222,V341,H244,V233,V351,H253,H204,H251,H230,V300,H202,H212,V223,V310;36:H222,H351,V233,V211,V241,H230,H244,V300,H201,H254,V351,V223,V230;36:H221,V232,H251,H253,V341,H243,V300,V210,V352,H204,H202,V223,H212,H230;36:H220,V332,H350,H203,H241,V200,V203,V250,H213,V244,H234,H201,V221;36:H220,V203,H250,V221,H352,H300,V242,V252,V254,H242,H232,V231,H214,H203;35:H220,V222,V204,H212,H300,H242,V232,H210,V254,H234,V250,H351,H203,V244;35:H220,V221,H214,H231,H252,V200,V231,H204,V254,H202,H341,H250,V252,V342;35:H220,H341,H303,V251,H234,H201,H250,V244,H213,V200,V232,V221,H252;35:H220,H203,V350,V222,H341,V244,H351,H201,H234,V200,V232,H312;34:H221,V352,V300,H204,V223,H230,V341,H201,V230,V232,H243,H251,H211,H253;34:H221,V341,H253,H204,V232,H202,V300,H230,V223,H243,H251,V252,H212,V210;34:H221,V300,H230,V341,H201,V230,H243,H253,V232,H251,H211,H204,V223,V253;34:H221,V234,V223,H233,V241,H302,V252,V301,H244,V210,V250,H350;34:H221,V223,V201,H214,H300,H240,V231,H211,V254,H233,V252,H350,H203;34:H220,H252,V203,H303,V320,V253,V232,H231,V242,V214,H342,H254,V251,H213;33:H221,H204,H243,V210,H253,H230,H251,V341,V300,V232,V223,V252,H202;33:H220,V221,V200,H203,V232,V250,H201,H241,V234,H213,H254,H251,H234,V303;33:H220,H254,H203,V251,H211,H252,V331,H230,V322,V200,H243,V214;33:H220,H202,H204,V321,V252,V254,V210,V203,V233,H352,H241,H250,V243,H313;33:H220,H202,H204,V321,V252,V254,V210,V203,H352,H241,H313,V243,V233";
+</script>
 <script>
     const CELL_SIZE = 50;
-
     const VEHICLE_COLORS = [
         '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
         '#ec4899', '#06b6d4', '#84cc16', '#a855f7',
-        '#eab308', '#64748b', '#f97316', '#14b8a6'
+        '#eab308', '#64748b', '#f97316', '#14b8a6',
+        '#d946ef', '#0ea5e9'
     ];
-
+    const TIERS = {
+        hard:        { min: 12, max: 20, label: 'Hard' },
+        expert:      { min: 21, max: 35, label: 'Expert' },
+        grandmaster: { min: 36, max: 60, label: 'Grandmaster' }
+    };
+    const GEN_BUDGET_MS = 25000;               // hard stop; best board found so far is used
+    const BANK_KEY = 'rushHourDeepLayoutBank'; // deep layouts discovered on this device
     let currentVehicles = [];
     let moveCount = 0;
     let minMovesTarget = 0;
-
+    let activeWorker = null;
+    let fallbackTimer = null;
     const boardEl = document.getElementById('board');
     const gridBg = document.getElementById('gridBg');
     const moveCountEl = document.getElementById('moveCount');
@@ -297,24 +469,12 @@
     const winOverlay = document.getElementById('winOverlay');
     const winStats = document.getElementById('winStats');
     const playAgainBtn = document.getElementById('playAgainBtn');
-
     // Build grid DOM
     for (let i = 0; i < 36; i++) {
         const cell = document.createElement('div');
         cell.className = 'grid-cell';
         gridBg.appendChild(cell);
     }
-
-    function encodeState(vehicles) {
-        // Vehicle identities, lengths and orientations never change, so positions
-        // are sufficient to uniquely identify a puzzle state.
-        return vehicles.map(v => `${v.x},${v.y}`).join('|');
-    }
-
-    function isSolved(vehicles) {
-        return vehicles[0].x === 4;
-    }
-
     function getBoardGrid(vehicles) {
         const grid = Array(6).fill(null).map(() => Array(6).fill(-1));
         vehicles.forEach((v, idx) => {
@@ -329,344 +489,128 @@
         return grid;
     }
 
-    function getValidMoves(vehicles) {
-        const neighbors = [];
-        const grid = getBoardGrid(vehicles);
-
-        vehicles.forEach((v, idx) => {
-            if (v.orientation === 'H') {
-                for (let dist = 1; v.x - dist >= 0; dist++) {
-                    if (grid[v.y][v.x - dist] !== -1) break;
-                    const nextV = vehicles.map(item => ({...item}));
-                    nextV[idx].x -= dist;
-                    neighbors.push(nextV);
-                }
-                for (let dist = 1; v.x + v.length - 1 + dist < 6; dist++) {
-                    if (grid[v.y][v.x + v.length - 1 + dist] !== -1) break;
-                    const nextV = vehicles.map(item => ({...item}));
-                    nextV[idx].x += dist;
-                    neighbors.push(nextV);
-                }
-            } else {
-                for (let dist = 1; v.y - dist >= 0; dist++) {
-                    if (grid[v.y - dist][v.x] !== -1) break;
-                    const nextV = vehicles.map(item => ({...item}));
-                    nextV[idx].y -= dist;
-                    neighbors.push(nextV);
-                }
-                for (let dist = 1; v.y + v.length - 1 + dist < 6; dist++) {
-                    if (grid[v.y + v.length - 1 + dist][v.x] !== -1) break;
-                    const nextV = vehicles.map(item => ({...item}));
-                    nextV[idx].y += dist;
-                    neighbors.push(nextV);
-                }
-            }
+    // ---------- Seed bank (built-in verified deep layouts + ones discovered on this device) ----------
+    function parseSeeds(str) {
+        return str.split(';').filter(Boolean).map(entry => {
+            const [max, body] = entry.split(':');
+            const veh = [], pos = [];
+            body.split(',').forEach(t => { veh.push({ o: t[0], len: +t[1], fixed: +t[2] }); pos.push(+t[3]); });
+            return { max: +max, veh, pos };
         });
-
-        return neighbors;
+    }
+    function loadSeedBank() {
+        let local = [];
+        try { local = JSON.parse(localStorage.getItem(BANK_KEY) || '[]'); } catch (_) {}
+        return parseSeeds(RH_BUILTIN_SEEDS).concat(local);
+    }
+    function saveDiscovered(list) {
+        if (!list || !list.length) return;
+        try {
+            const local = JSON.parse(localStorage.getItem(BANK_KEY) || '[]');
+            const sig = s => s.veh.map((v, i) => v.o + v.len + v.fixed + s.pos[i]).join(',');
+            const seen = new Set(local.map(sig));
+            list.forEach(s => { if (!seen.has(sig(s))) { seen.add(sig(s)); local.push(s); } });
+            localStorage.setItem(BANK_KEY, JSON.stringify(local.slice(-60)));
+        } catch (_) {}
     }
 
-    // Create a random valid vehicle layout with the red car already at the exit.
-    // This is the solved endpoint from which we construct a puzzle by reversing moves.
-    function createRandomSolvedLayout() {
-        const vehicles = [
-            { id: 0, x: 4, y: 2, length: 2, orientation: 'H', isTarget: true, color: '#ef4444' }
-        ];
-
-        const numObstacles = Math.floor(Math.random() * 3) + 8; // 8-10
-        let colorIdx = 0;
-        let placementAttempts = 0;
-
-        while (vehicles.length < numObstacles + 1 && placementAttempts < 5000) {
-            placementAttempts++;
-
-            const length = Math.random() < 0.30 ? 3 : 2;
-            const orientation = Math.random() < 0.5 ? 'H' : 'V';
-
-            const maxX = orientation === 'H' ? 6 - length : 5;
-            const maxY = orientation === 'V' ? 6 - length : 5;
-            const x = Math.floor(Math.random() * (maxX + 1));
-            const y = Math.floor(Math.random() * (maxY + 1));
-
-            const grid = getBoardGrid(vehicles);
-            let overlap = false;
-
-            for (let i = 0; i < length; i++) {
-                const cx = orientation === 'H' ? x + i : x;
-                const cy = orientation === 'V' ? y + i : y;
-
-                // The initial solved position must leave cells 0-3 of the
-                // red-car row empty. That makes the reverse move x=4 -> x=0
-                // legal, rather than teleporting the red car through obstacles.
-                if (cy === 2 && cx <= 3) {
-                    overlap = true;
-                    break;
+    // ---------- Generation (Web Worker so the UI never freezes) ----------
+    function makeWorker() {
+        const src = document.getElementById('rh-engine').textContent + `
+            self.onmessage = function (e) {
+                var d = e.data, g = new RH.Generator(d.min, d.max, d.seeds), t0 = Date.now(), res = null;
+                while (!res) {
+                    res = g.step(250);
+                    if (!res) {
+                        self.postMessage({ type: 'progress', best: g.bestDepth() });
+                        if (Date.now() - t0 > d.budget && g.best) res = g.finish(true);
+                    }
                 }
-
-                if (grid[cy][cx] !== -1) {
-                    overlap = true;
-                    break;
-                }
-            }
-
-            if (!overlap) {
-                vehicles.push({
-                    id: vehicles.length,
-                    x,
-                    y,
-                    length,
-                    orientation,
-                    isTarget: false,
-                    color: VEHICLE_COLORS[colorIdx % VEHICLE_COLORS.length]
-                });
-                colorIdx++;
-            }
-        }
-
-        return vehicles.length === numObstacles + 1 ? vehicles : null;
+                self.postMessage({ type: 'done', result: res, discovered: g.discovered });
+            };`;
+        return new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
     }
-
-    // Pick one legal reverse move. The red car is deliberately excluded after
-    // its initial reverse move so the scramble cannot undo most of its own difficulty.
-    function getRandomReverseMove(vehicles, previousKey, allowTarget) {
-        const moves = [];
-        const grid = getBoardGrid(vehicles);
-
-        vehicles.forEach((v, idx) => {
-            if (v.isTarget && !allowTarget) return;
-
-            if (v.orientation === 'H') {
-                for (let dist = 1; v.x - dist >= 0; dist++) {
-                    if (grid[v.y][v.x - dist] !== -1) break;
-                    const nextState = vehicles.map(item => ({...item}));
-                    nextState[idx].x -= dist;
-                    const key = encodeState(nextState);
-                    if (key !== previousKey) moves.push(nextState);
-                }
-
-                for (let dist = 1; v.x + v.length - 1 + dist < 6; dist++) {
-                    if (grid[v.y][v.x + v.length - 1 + dist] !== -1) break;
-                    const nextState = vehicles.map(item => ({...item}));
-                    nextState[idx].x += dist;
-                    const key = encodeState(nextState);
-                    if (key !== previousKey) moves.push(nextState);
-                }
-            } else {
-                for (let dist = 1; v.y - dist >= 0; dist++) {
-                    if (grid[v.y - dist][v.x] !== -1) break;
-                    const nextState = vehicles.map(item => ({...item}));
-                    nextState[idx].y -= dist;
-                    const key = encodeState(nextState);
-                    if (key !== previousKey) moves.push(nextState);
-                }
-
-                for (let dist = 1; v.y + v.length - 1 + dist < 6; dist++) {
-                    if (grid[v.y + v.length - 1 + dist][v.x] !== -1) break;
-                    const nextState = vehicles.map(item => ({...item}));
-                    nextState[idx].y += dist;
-                    const key = encodeState(nextState);
-                    if (key !== previousKey) moves.push(nextState);
-                }
-            }
-        });
-
-        return moves.length ? moves[Math.floor(Math.random() * moves.length)] : null;
+    function stopGeneration() {
+        if (activeWorker) { activeWorker.terminate(); activeWorker = null; }
+        if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = null; }
     }
-
-    // Exact shortest-path solver used only AFTER a board has been constructed.
-    // It verifies the actual puzzle difficulty without driving generation.
-    function solvePuzzle(initialVehicles, maxIterations = 75000) {
-        if (isSolved(initialVehicles)) return 0;
-
-        const queue = [{ state: initialVehicles, dist: 0 }];
-        let head = 0;
-        const visited = new Set([encodeState(initialVehicles)]);
-        let iterations = 0;
-
-        while (head < queue.length && iterations < maxIterations) {
-            const { state, dist } = queue[head++];
-            iterations++;
-
-            const neighbors = getValidMoves(state);
-            for (const nextState of neighbors) {
-                const nextDist = dist + 1;
-                if (isSolved(nextState)) return nextDist;
-
-                const key = encodeState(nextState);
-                if (!visited.has(key)) {
-                    visited.add(key);
-                    queue.push({ state: nextState, dist: nextDist });
-                }
-            }
-        }
-
-        return -1;
-    }
-
     function generatePuzzle() {
-        genStatus.innerText = "Building a new puzzle...";
-
-        setTimeout(() => {
-            const diff = difficultySelect.value;
-            let minTarget = 12, maxTarget = 20;
-            let scrambleMin = 30, scrambleMax = 45;
-            if (diff === 'expert') { minTarget = 21; maxTarget = 35; scrambleMin = 45; scrambleMax = 65; }
-            if (diff === 'grandmaster') { minTarget = 36; maxTarget = 60; scrambleMin = 70; scrambleMax = 100; }
-
-            let bestBoard = null;
-            let bestScore = Infinity;
-
-            // Construct many boards from solved endpoints, but only solve the
-            // constructed candidates. We never solve arbitrary random layouts.
-            for (let attempt = 0; attempt < 10; attempt++) {
-                let vehicles = createRandomSolvedLayout();
-                if (!vehicles) continue;
-
-                // Mandatory first reverse move: put the red car at the far left.
-                // This makes a one-move puzzle impossible by construction, and from
-                // here onward the red car never moves during the backward scramble.
-                vehicles[0].x = 0;
-
-                // Continue scrambling only the obstacle vehicles. Use a much deeper
-                // construction path than the requested minimum because random walks
-                // can contain moves that are unnecessary in the final shortest path.
-                let previousKey = encodeState(vehicles);
-                const visitedDuringScramble = new Set([previousKey]);
-                const targetDepth = scrambleMin + Math.floor(Math.random() * (scrambleMax - scrambleMin + 1));
-                let scrambleDepth = 1;
-
-                while (scrambleDepth < targetDepth) {
-                    let options = [];
-                    const grid = getBoardGrid(vehicles);
-
-                    vehicles.forEach((v, idx) => {
-                        if (idx === 0) return;
-
-                        if (v.orientation === 'H') {
-                            for (let dist = 1; v.x - dist >= 0; dist++) {
-                                if (grid[v.y][v.x - dist] !== -1) break;
-                                const nextState = vehicles.map(item => ({...item}));
-                                nextState[idx].x -= dist;
-                                const key = encodeState(nextState);
-                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
-                            }
-                            for (let dist = 1; v.x + v.length - 1 + dist < 6; dist++) {
-                                if (grid[v.y][v.x + v.length - 1 + dist] !== -1) break;
-                                const nextState = vehicles.map(item => ({...item}));
-                                nextState[idx].x += dist;
-                                const key = encodeState(nextState);
-                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
-                            }
-                        } else {
-                            for (let dist = 1; v.y - dist >= 0; dist++) {
-                                if (grid[v.y - dist][v.x] !== -1) break;
-                                const nextState = vehicles.map(item => ({...item}));
-                                nextState[idx].y -= dist;
-                                const key = encodeState(nextState);
-                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
-                            }
-                            for (let dist = 1; v.y + v.length - 1 + dist < 6; dist++) {
-                                if (grid[v.y + v.length - 1 + dist][v.x] !== -1) break;
-                                const nextState = vehicles.map(item => ({...item}));
-                                nextState[idx].y += dist;
-                                const key = encodeState(nextState);
-                                if (key !== previousKey && !visitedDuringScramble.has(key)) options.push({ nextState, key });
-                            }
-                        }
-                    });
-
-                    if (!options.length) break;
-                    const chosen = options[Math.floor(Math.random() * options.length)];
-                    previousKey = chosen.key;
-                    visitedDuringScramble.add(chosen.key);
-                    vehicles = chosen.nextState;
-                    scrambleDepth++;
-                }
-
-                // The red car starts at x=0. Require at least one vehicle to block
-                // the exit lane, otherwise the puzzle could still be solved in one move.
-                const finalGrid = getBoardGrid(vehicles);
-                const hasExitBlocker = finalGrid[2][2] !== -1 || finalGrid[2][3] !== -1;
-                if (!hasExitBlocker) continue;
-
-                // Verify the actual shortest solution length. This is the quantity
-                // shown to the player, not the arbitrary scramble depth.
-                const actualDepth = solvePuzzle(vehicles);
-                if (actualDepth >= minTarget && actualDepth <= maxTarget) {
-                    bestBoard = vehicles;
-                    bestScore = actualDepth;
-                    break;
-                }
-
-                // Keep the closest valid candidate as a safety fallback.
-                const distance = actualDepth < 0
-                    ? 1000
-                    : actualDepth < minTarget
-                        ? minTarget - actualDepth
-                        : actualDepth > maxTarget
-                            ? actualDepth - maxTarget
-                            : 0;
-                if (distance < bestScore) {
-                    bestScore = distance;
-                    bestBoard = vehicles;
-                    bestBoard._actualDepth = actualDepth;
-                }
-            }
-
-            // Final fallback: keep constructing until we have a solvable board.
-            if (!bestBoard) {
-                bestBoard = createRandomSolvedLayout();
-                minTarget = 0;
-                bestScore = 0;
-            }
-
-            const verifiedDepth = typeof bestBoard._actualDepth === 'number'
-                ? bestBoard._actualDepth
-                : solvePuzzle(bestBoard);
-            delete bestBoard._actualDepth;
-
-            currentVehicles = bestBoard;
-            minMovesTarget = verifiedDepth > 0 ? verifiedDepth : 0;
-            moveCount = 0;
-            genStatus.innerText = verifiedDepth >= minTarget && verifiedDepth <= maxTarget
-                ? ""
-                : "Generated a solvable board; generating a deeper one next time.";
-            renderBoard();
-        }, 20);
+        stopGeneration();
+        const tier = TIERS[difficultySelect.value];
+        const job = { min: tier.min, max: tier.max, seeds: loadSeedBank(), budget: GEN_BUDGET_MS };
+        genStatus.innerText = `Building ${tier.label} puzzle...`;
+        generateBtn.disabled = true;
+        const onProgress = best => {
+            genStatus.innerText = `Building ${tier.label} puzzle... deepest so far: ${best} moves`;
+        };
+        let worker = null;
+        try { worker = makeWorker(); } catch (_) { worker = null; }
+        if (worker) {
+            activeWorker = worker;
+            worker.onmessage = e => {
+                if (e.data.type === 'progress') onProgress(e.data.best);
+                else { stopGeneration(); saveDiscovered(e.data.discovered); applyPuzzle(e.data.result, tier); }
+            };
+            worker.onerror = () => { stopGeneration(); runOnMainThread(job, tier, onProgress); };
+            worker.postMessage(job);
+        } else {
+            runOnMainThread(job, tier, onProgress);
+        }
     }
-
+    // Fallback if Workers are blocked: same generator, run in small time slices.
+    function runOnMainThread(job, tier, onProgress) {
+        const g = new RH.Generator(job.min, job.max, job.seeds), t0 = Date.now();
+        const tick = () => {
+            let res = g.step(40);
+            if (!res && Date.now() - t0 > job.budget && g.best) res = g.finish(true);
+            if (res) { fallbackTimer = null; saveDiscovered(g.discovered); applyPuzzle(res, tier); return; }
+            onProgress(g.bestDepth());
+            fallbackTimer = setTimeout(tick, 0);
+        };
+        tick();
+    }
+    function applyPuzzle(res, tier) {
+        const palette = VEHICLE_COLORS.slice().sort(() => Math.random() - 0.5);
+        currentVehicles = res.veh.map((v, i) => ({
+            id: i,
+            x: v.o === 'H' ? res.pos[i] : v.fixed,
+            y: v.o === 'H' ? v.fixed : res.pos[i],
+            length: v.len,
+            orientation: v.o,
+            isTarget: i === 0,
+            color: i === 0 ? '#ef4444' : palette[(i - 1) % palette.length]
+        }));
+        minMovesTarget = res.depth;
+        moveCount = 0;
+        generateBtn.disabled = false;
+        genStatus.innerText = res.inRange ? '' :
+            `Closest found: ${res.depth} moves (below ${tier.label} range). Try New Board.`;
+        renderBoard();
+    }
     function renderBoard() {
         const existingVehicles = boardEl.querySelectorAll('.vehicle');
         existingVehicles.forEach(el => el.remove());
-
         moveCountEl.innerText = moveCount;
         minMovesEl.innerText = `${minMovesTarget} moves`;
-
         currentVehicles.forEach(v => {
             const vEl = document.createElement('div');
             vEl.className = `vehicle ${v.isTarget ? 'target' : ''}`;
             vEl.id = `vehicle-${v.id}`;
             vEl.style.backgroundColor = v.color;
-
             const width = v.orientation === 'H' ? v.length * CELL_SIZE - 4 : CELL_SIZE - 4;
             const height = v.orientation === 'V' ? v.length * CELL_SIZE - 4 : CELL_SIZE - 4;
-
             vEl.style.width = `${width}px`;
             vEl.style.height = `${height}px`;
             vEl.style.left = `${v.x * CELL_SIZE + 2}px`;
             vEl.style.top = `${v.y * CELL_SIZE + 2}px`;
-
             if (v.isTarget) {
                 vEl.innerHTML = '★ ESCAPE ★';
             }
-
             attachDragEvents(vEl, v);
             boardEl.appendChild(vEl);
         });
-
         winOverlay.classList.remove('active');
     }
-
     function attachDragEvents(el, vehicle) {
         let startX, startY, origX, origY;
         let isDragging = false;
@@ -770,6 +714,5 @@
 
     generatePuzzle();
 </script>
-
 </body>
 </html>
