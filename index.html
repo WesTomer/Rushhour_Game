@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Rush Hour Puzzle Game - Expert Edition</title>
+    <title>Rush Hour Puzzle Game</title>
     <style>
         :root {
             --bg-color: #0b0f19;
@@ -14,6 +14,8 @@
             --text-color: #f9fafb;
             --text-muted: #9ca3af;
             --border-radius: 12px;
+            --cell: 50px;      /* set from JS to fit the screen */
+            --ui-scale: 1;     /* grows text and controls on larger screens */
         }
 
         * {
@@ -34,17 +36,18 @@
             align-items: center;
             justify-content: center;
             padding: 10px;
+            font-size: calc(16px * var(--ui-scale));
         }
 
         .container {
             background-color: var(--card-bg);
-            padding: 20px;
+            padding: calc(20px * var(--ui-scale));
             border-radius: var(--border-radius);
             box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7);
             display: flex;
             flex-direction: column;
             align-items: center;
-            max-width: 420px;
+            max-width: calc(var(--cell) * 6 + 40px + 40px * var(--ui-scale));
             width: 100%;
             border: 1px solid #1f2937;
         }
@@ -55,14 +58,14 @@
         }
 
         h1 {
-            font-size: 1.75rem;
+            font-size: 1.75em;
             color: #f3f4f6;
             margin-bottom: 6px;
             letter-spacing: 1px;
         }
 
         .objective {
-            font-size: 0.85rem;
+            font-size: 0.85em;
             color: var(--text-muted);
             margin-bottom: 10px;
             line-height: 1.4;
@@ -81,8 +84,8 @@
         }
 
         select, button {
-            padding: 10px 12px;
-            font-size: 0.9rem;
+            padding: 0.65em 0.8em;
+            font-size: 0.9em;
             border-radius: 8px;
             border: 1px solid #374151;
             outline: none;
@@ -100,6 +103,7 @@
             color: white;
             font-weight: 600;
             border: none;
+            white-space: nowrap;
         }
 
         button:disabled {
@@ -107,9 +111,9 @@
             cursor: wait;
         }
         .gen-status {
-            font-size: 0.85rem;
+            font-size: 0.85em;
             color: var(--accent-color);
-            height: 20px;
+            min-height: 1.4em; text-align: center;
             margin-bottom: 10px;
             font-weight: 500;
         }
@@ -125,8 +129,8 @@
 
         .board-container {
             position: relative;
-            width: 300px;
-            height: 300px;
+            width: calc(var(--cell) * 6);
+            height: calc(var(--cell) * 6);
             background-color: var(--grid-bg);
             border-radius: 8px;
             touch-action: none;
@@ -151,14 +155,14 @@
 
         .exit-marker {
             position: absolute;
-            right: -24px;
-            top: 100px;
-            height: 50px;
+            right: calc(var(--cell) * -0.48);
+            top: calc(var(--cell) * 2);
+            height: var(--cell);
             display: flex;
             align-items: center;
             justify-content: center;
             color: #ef4444;
-            font-size: 20px;
+            font-size: calc(var(--cell) * 0.4);
             font-weight: bold;
         }
 
@@ -172,7 +176,7 @@
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 0.75rem;
+            font-size: calc(var(--cell) * 0.24);
             color: rgba(255, 255, 255, 0.9);
             box-shadow: inset 0 2px 0 rgba(255,255,255,0.3), inset 0 -2px 0 rgba(0,0,0,0.3), 0 4px 6px rgba(0,0,0,0.4);
             border: 2px solid rgba(0,0,0,0.2);
@@ -195,7 +199,7 @@
             display: flex;
             justify-content: space-between;
             width: 100%;
-            font-size: 0.9rem;
+            font-size: 0.9em;
             color: var(--text-muted);
         }
 
@@ -223,7 +227,7 @@
         }
 
         .win-overlay h2 {
-            font-size: 1.8rem;
+            font-size: 1.8em;
             color: #4ade80;
             margin-bottom: 10px;
         }
@@ -250,8 +254,10 @@
 
     <div class="controls">
         <select id="difficulty">
+            <option value="easy">Easy (2 - 5 moves)</option>
+            <option value="regular" selected>Regular (6 - 11 moves)</option>
             <option value="hard">Hard (12 - 20 moves)</option>
-            <option value="expert" selected>Expert (21 - 35 moves)</option>
+            <option value="expert">Expert (21 - 35 moves)</option>
             <option value="grandmaster">Grandmaster (36+ moves)</option>
         </select>
         <button id="generateBtn">New Board</button>
@@ -440,7 +446,7 @@ var RH = (function () {
 var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H251,V233,V223,V341;44:H223,H251,V223,H253,V240,V233,H244,V250,V300,V252,V211,H201,H230,V221;44:H220,V232,V254,H351,H341,H312,H234,H202,V244,V222,V200,H204,V251;42:H220,H250,V321,H341,H300,V252,V254,H214,V203,H233,V244,H252,V230;41:H220,H301,V252,V224,V242,V240,V233,V250,H244,V203,H231,V231,H250,H210;41:H220,H301,V252,V223,V242,H230,V231,H211,H244,V200,V250,V233,H251,H253;40:H221,H350,H242,V220,V252,V302,H303,V331,V254,V243,V213,V200,H253;40:H221,H350,H242,V220,V252,V302,H303,V331,V254,V213,V243,H253;40:H220,H233,H242,H214,H250,V330,V244,V252,V222,V203,H300,H204,V254,H252;39:H222,H351,V233,V211,V241,H244,V303,H200,V351,V230,V220,H231,V201,H254;39:H220,H250,V321,H341,H302,V250,V252,H213,V203,H233,V244,H252;38:H222,H351,V233,V211,V241,H244,V303,H200,V351,V230,V220,H231,V201;38:H221,V330,V323,H250,H240,V254,H200,V201,H233,V252,H253,H214;38:H220,V330,V322,H251,V253,H201,V200,H233,V251,H254,H211;38:H220,H251,V320,H342,H253,V242,V213,H303,V252,V254,H214,V203,H232;38:H220,H233,H242,H214,H250,V330,V244,V253,V221,V203,H300,H204,H231;38:H220,H231,H234,H241,H203,H213,V254,H250,V332,V244,V250,V221,V203,H300;37:H223,H253,H201,V230,V212,V254,V223,V202,H250,H214,V221,V252,H243,V200;37:H223,H201,H243,H214,V202,V223,V252,V212,V200,V230,V254,V221,H250,H352;37:H221,V213,H211,H232,V224,V242,H243,V201,V240,V252,H250,V250,H300;37:H221,H350,H242,V220,V251,V302,H303,V331,V253,V243,V213,V200;37:H221,H350,H242,V220,V251,V302,H303,V331,V253,V243,V213;37:H221,H200,H230,V331,H211,V223,H203,V201,H254,H252,V214,V251,V241;37:H220,H312,V244,H242,H351,H204,H202,V222,V251,V210,V204,H234,V254,V232;37:H220,H301,V252,V224,V242,V240,V234,V250,H244,V231,V200,H250,H231;36:H222,V341,H244,V233,V351,H253,H204,H251,H230,V300,H202,H212,V223,V310;36:H222,H351,V233,V211,V241,H230,H244,V300,H201,H254,V351,V223,V230;36:H221,V232,H251,H253,V341,H243,V300,V210,V352,H204,H202,V223,H212,H230;36:H220,V332,H350,H203,H241,V200,V203,V250,H213,V244,H234,H201,V221;36:H220,V203,H250,V221,H352,H300,V242,V252,V254,H242,H232,V231,H214,H203;35:H220,V222,V204,H212,H300,H242,V232,H210,V254,H234,V250,H351,H203,V244;35:H220,V221,H214,H231,H252,V200,V231,H204,V254,H202,H341,H250,V252,V342;35:H220,H341,H303,V251,H234,H201,H250,V244,H213,V200,V232,V221,H252;35:H220,H203,V350,V222,H341,V244,H351,H201,H234,V200,V232,H312;34:H221,V352,V300,H204,V223,H230,V341,H201,V230,V232,H243,H251,H211,H253;34:H221,V341,H253,H204,V232,H202,V300,H230,V223,H243,H251,V252,H212,V210;34:H221,V300,H230,V341,H201,V230,H243,H253,V232,H251,H211,H204,V223,V253;34:H221,V234,V223,H233,V241,H302,V252,V301,H244,V210,V250,H350;34:H221,V223,V201,H214,H300,H240,V231,H211,V254,H233,V252,H350,H203;34:H220,H252,V203,H303,V320,V253,V232,H231,V242,V214,H342,H254,V251,H213;33:H221,H204,H243,V210,H253,H230,H251,V341,V300,V232,V223,V252,H202;33:H220,V221,V200,H203,V232,V250,H201,H241,V234,H213,H254,H251,H234,V303;33:H220,H254,H203,V251,H211,H252,V331,H230,V322,V200,H243,V214;33:H220,H202,H204,V321,V252,V254,V210,V203,V233,H352,H241,H250,V243,H313;33:H220,H202,H204,V321,V252,V254,V210,V203,H352,H241,H313,V243,V233";
 </script>
 <script>
-    const CELL_SIZE = 50;
+    let CELL_SIZE = 50; // recalculated by fitToScreen()
     const VEHICLE_COLORS = [
         '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6',
         '#ec4899', '#06b6d4', '#84cc16', '#a855f7',
@@ -448,6 +454,8 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
         '#d946ef', '#0ea5e9'
     ];
     const TIERS = {
+        easy:        { min: 2,  max: 5,  label: 'Easy' },
+        regular:     { min: 6,  max: 11, label: 'Regular' },
         hard:        { min: 12, max: 20, label: 'Hard' },
         expert:      { min: 21, max: 35, label: 'Expert' },
         grandmaster: { min: 36, max: 60, label: 'Grandmaster' }
@@ -469,6 +477,37 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
     const winOverlay = document.getElementById('winOverlay');
     const winStats = document.getElementById('winStats');
     const playAgainBtn = document.getElementById('playAgainBtn');
+    // ---------- Responsive sizing: board fills the screen width on phones AND tablets ----------
+    function fitToScreen() {
+        const vv = window.visualViewport;
+        const vw = vv ? vv.width : window.innerWidth;
+        const vh = vv ? vv.height : window.innerHeight;
+        const uiScale = Math.max(1, Math.min(1.4, Math.min(vw, vh) / 520));  // larger text/buttons on iPad
+        document.documentElement.style.setProperty('--ui-scale', uiScale.toFixed(3));
+        // Width: page padding (20) + card padding + board frame (24) + room for exit arrow
+        const byWidth = (vw - 20 - 40 * uiScale - 24) / 6.5;
+        // Height: leave room for title, controls and status bar so nothing needs scrolling
+        const byHeight = (vh - 44 - 235 * uiScale) / 6;
+        const cell = Math.floor(Math.max(40, Math.min(byWidth, byHeight)));
+        CELL_SIZE = cell;
+        document.documentElement.style.setProperty('--cell', cell + 'px');
+        layoutVehicles();
+    }
+    function layoutVehicles() {
+        currentVehicles.forEach(v => {
+            const vEl = document.getElementById(`vehicle-${v.id}`);
+            if (!vEl) return;
+            const exited = v.isTarget && v.x === 4 && winOverlay.classList.contains('active');
+            vEl.style.width = `${(v.orientation === 'H' ? v.length * CELL_SIZE : CELL_SIZE) - 4}px`;
+            vEl.style.height = `${(v.orientation === 'V' ? v.length * CELL_SIZE : CELL_SIZE) - 4}px`;
+            vEl.style.left = `${(exited ? 6 : v.x) * CELL_SIZE + 2}px`;
+            vEl.style.top = `${v.y * CELL_SIZE + 2}px`;
+        });
+    }
+    window.addEventListener('resize', fitToScreen);
+    window.addEventListener('orientationchange', () => setTimeout(fitToScreen, 250));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', fitToScreen);
+
     // Build grid DOM
     for (let i = 0; i < 36; i++) {
         const cell = document.createElement('div');
@@ -712,6 +751,7 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
     generateBtn.addEventListener('click', generatePuzzle);
     playAgainBtn.addEventListener('click', generatePuzzle);
 
+    fitToScreen();
     generatePuzzle();
 </script>
 </body>
