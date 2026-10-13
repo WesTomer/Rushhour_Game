@@ -77,14 +77,19 @@
         }
 
         .controls {
-            display: flex;
-            gap: 10px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            gap: clamp(6px, 1.5vw, 10px);
             width: 100%;
+            max-width: 100%;
             margin-bottom: 15px;
+            align-items: stretch;
         }
 
         select, button {
-            padding: 0.65em 0.8em;
+            min-width: 0;
+            max-width: 100%;
+            padding: 0.65em clamp(0.55em, 1.5vw, 0.8em);
             font-size: 0.9em;
             border-radius: 8px;
             border: 1px solid #374151;
@@ -95,7 +100,8 @@
         select {
             background-color: #0b0f19;
             color: var(--text-color);
-            flex: 1;
+            width: 100%;
+            min-width: 0;
         }
 
         button {
@@ -104,6 +110,7 @@
             font-weight: 600;
             border: none;
             white-space: nowrap;
+            width: auto;
         }
 
         button:disabled {
@@ -115,6 +122,14 @@
         }
         #resetBtn:not(:disabled):hover {
             background-color: #1d4ed8;
+        }
+        @media (max-width: 430px) {
+            .controls { gap: 6px; }
+            select, button {
+                font-size: 0.82em;
+                padding-left: 0.55em;
+                padding-right: 0.55em;
+            }
         }
         .gen-status {
             font-size: 0.85em;
@@ -267,7 +282,7 @@
             <option value="grandmaster">Grandmaster (36+ moves)</option>
         </select>
         <button id="resetBtn" disabled>Reset</button>
-        <button id="generateBtn">New Board</button>
+        <button id="generateBtn">New</button>
     </div>
 
     <div class="gen-status" id="genStatus"></div>
