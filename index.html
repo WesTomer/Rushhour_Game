@@ -108,7 +108,13 @@
 
         button:disabled {
             opacity: 0.55;
-            cursor: wait;
+            cursor: not-allowed;
+        }
+        #resetBtn {
+            background-color: #2563eb;
+        }
+        #resetBtn:not(:disabled):hover {
+            background-color: #1d4ed8;
         }
         .gen-status {
             font-size: 0.85em;
@@ -260,6 +266,7 @@
             <option value="expert">Expert (21 - 35 moves)</option>
             <option value="grandmaster">Grandmaster (36+ moves)</option>
         </select>
+        <button id="resetBtn" disabled>Reset</button>
         <button id="generateBtn">New Board</button>
     </div>
 
@@ -463,15 +470,19 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
     const GEN_BUDGET_MS = 25000;               // hard stop; best board found so far is used
     const BANK_KEY = 'rushHourDeepLayoutBank'; // deep layouts discovered on this device
     let currentVehicles = [];
+    let originalVehicles = [];
     let moveCount = 0;
     let minMovesTarget = 0;
     let activeWorker = null;
     let fallbackTimer = null;
+    let winExitTimer = null;
+    let winOverlayTimer = null;
     const boardEl = document.getElementById('board');
     const gridBg = document.getElementById('gridBg');
     const moveCountEl = document.getElementById('moveCount');
     const minMovesEl = document.getElementById('minMoves');
     const difficultySelect = document.getElementById('difficulty');
+    const resetBtn = document.getElementById('resetBtn');
     const generateBtn = document.getElementById('generateBtn');
     const genStatus = document.getElementById('genStatus');
     const winOverlay = document.getElementById('winOverlay');
@@ -579,6 +590,7 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
         const job = { min: tier.min, max: tier.max, seeds: loadSeedBank(), budget: GEN_BUDGET_MS };
         genStatus.innerText = `Building ${tier.label} puzzle...`;
         generateBtn.disabled = true;
+        resetBtn.disabled = true;
         const onProgress = best => {
             genStatus.innerText = `Building ${tier.label} puzzle... deepest so far: ${best} moves`;
         };
@@ -619,14 +631,36 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
             isTarget: i === 0,
             color: i === 0 ? '#ef4444' : palette[(i - 1) % palette.length]
         }));
+        originalVehicles = currentVehicles.map(v => ({ ...v }));
         minMovesTarget = res.depth;
         moveCount = 0;
         generateBtn.disabled = false;
+        resetBtn.disabled = true;
         genStatus.innerText = res.inRange ? '' :
             `Closest found: ${res.depth} moves (below ${tier.label} range). Try New Board.`;
         renderBoard();
     }
+    function clearWinTimers() {
+        if (winExitTimer !== null) {
+            clearTimeout(winExitTimer);
+            winExitTimer = null;
+        }
+        if (winOverlayTimer !== null) {
+            clearTimeout(winOverlayTimer);
+            winOverlayTimer = null;
+        }
+    }
+    function resetPuzzle() {
+        if (!originalVehicles.length || generateBtn.disabled) return;
+        clearWinTimers();
+        currentVehicles = originalVehicles.map(v => ({ ...v }));
+        moveCount = 0;
+        resetBtn.disabled = true;
+        genStatus.innerText = '';
+        renderBoard();
+    }
     function renderBoard() {
+        clearWinTimers();
         const existingVehicles = boardEl.querySelectorAll('.vehicle');
         existingVehicles.forEach(el => el.remove());
         moveCountEl.innerText = moveCount;
@@ -726,6 +760,7 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
             if (vehicle.x !== origX || vehicle.y !== origY) {
                 moveCount++;
                 moveCountEl.innerText = moveCount;
+                resetBtn.disabled = false;
                 checkWinCondition();
             }
         };
@@ -736,11 +771,15 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
     function checkWinCondition() {
         const target = currentVehicles[0];
         if (target.x === 4) {
-            setTimeout(() => {
+            clearWinTimers();
+            winExitTimer = setTimeout(() => {
+                winExitTimer = null;
                 const targetEl = document.getElementById('vehicle-0');
+                if (!targetEl || currentVehicles[0].x !== 4) return;
                 targetEl.style.left = `${6 * CELL_SIZE + 2}px`;
-                
-                setTimeout(() => {
+                winOverlayTimer = setTimeout(() => {
+                    winOverlayTimer = null;
+                    if (currentVehicles[0].x !== 4) return;
                     winStats.innerText = `Solved in ${moveCount} moves! (Depth: ${minMovesTarget})`;
                     winOverlay.classList.add('active');
                 }, 300);
@@ -748,6 +787,7 @@ var RH_BUILTIN_SEEDS = "46:H220,H302,V252,H230,V231,H211,H244,V200,V250,H253,H25
         }
     }
 
+    resetBtn.addEventListener('click', resetPuzzle);
     generateBtn.addEventListener('click', generatePuzzle);
     playAgainBtn.addEventListener('click', generatePuzzle);
 
